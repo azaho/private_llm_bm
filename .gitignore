@@ -1,0 +1,5 @@
+figures/*
+gitignore_data/*
+data*/*
+data*
+*.zip
