@@ -18,8 +18,8 @@ args = parser.parse_args()
 
 random_seed = int(hashlib.sha1(args.random.encode("utf-8")).hexdigest(),
                                          16) % 10 ** 8  # random initialization seed (for reproducibility)
-torch.manual_seed(random_seed)
-np.random.seed(random_seed)
+#torch.manual_seed(random_seed)
+#np.random.seed(random_seed)
 
 # editable parameters
 llm_model_index = args.llm_model_index
@@ -256,7 +256,14 @@ class DelayedEmbeddingLinearModel(nn.Module):
     def forward(self, X):
         X_llm, X_fmri = X
         n_llm_batches, n_llm_timesteps, n_llm_features = X_llm.shape
-        return self.linear_llm2(self.linear_llm1(X_llm).squeeze()) + self.linear_fmri(X_fmri)
+
+        # FOR DEBUG
+        # print(X_llm.shape)
+        # print(self.linear_llm1(X_llm).shape, self.linear_llm1(X_llm).squeeze(dim=-1).shape)
+        # print(self.linear_llm2(self.linear_llm1(X_llm).squeeze(dim=-1)).shape)
+        # exit()
+
+        return self.linear_llm2(self.linear_llm1(X_llm).squeeze(dim=-1)) + self.linear_fmri(X_fmri)
         return self.linear_llm2(torch.maximum(self.linear_llm1(X_llm).squeeze(), torch.tensor(0))) + self.linear_fmri(X_fmri)
     
 
