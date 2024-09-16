@@ -2,7 +2,7 @@
 #SBATCH -n 1                # node count
 #SBATCH --mem-per-cpu=16G    # memory per cpu-core
 #SBATCH -t 1:00:00         # total run time limit (HH:MM:SS) (increased to 24 hours)
-#SBATCH --array=0-3999       # 4000 total combinations (4*5*4*5*2*5)
+#SBATCH --array=0-2000       # 2000 total combinations (4*5*4*5*5)
 #SBATCH --output /om2/user/zaho/private_llm_bm/reports/slurm-%A_%a.out # STDOUT
 export PATH="/om2/user/zaho/anaconda3/bin:$PATH"
 
@@ -23,15 +23,14 @@ convolve_size_index=$((index % 4))
 index=$((index / 4))
 n_delay_embedding_llm_index=$((index % 5))
 index=$((index / 5))
-llm_model_index=$((index % 2))
-random_index=$((index / 2))
+random_index=$((index % 5))
 
 # Get the actual parameter values
 n_top_pc_llm=${n_top_pc_llm_array[$n_top_pc_llm_index]}
 weight_decay=${weight_decay_array[$weight_decay_index]}
 convolve_size=${convolve_size_array[$convolve_size_index]}
 n_delay_embedding_llm=${n_delay_embedding_llm_array[$n_delay_embedding_llm_index]}
-llm_model_index=${llm_model_index_array[$llm_model_index]}
+llm_model_index=1
 
 echo "Running with parameters:"
 echo "n_top_pc_llm: $n_top_pc_llm"
