@@ -9,7 +9,7 @@ export PATH="/om2/user/zaho/anaconda3/bin:$PATH"
 # Define arrays for each hyperparameter
 n_top_pc_llm_array=(100 400 800 -1)
 weight_decay_array=(0.0 0.001 0.005 0.01 0.02)
-convolve_size_array=(1 4 8 16)
+convolve_size_array=(1 2 4 6 8)
 n_delay_embedding_llm_array=(1 2 4 8 16)
 llm_model_index_array=(0 1)
 
