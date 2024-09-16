@@ -2,7 +2,7 @@
 #SBATCH -n 1                # node count
 #SBATCH --mem-per-cpu=16G    # memory per cpu-core
 #SBATCH -t 1:00:00         # total run time limit (HH:MM:SS) (increased to 24 hours)
-#SBATCH --array=0-2000       # 2000 total combinations (4*5*4*5*5)
+#SBATCH --array=0-1999       # 2000 total combinations (4*5*4*5*5)
 #SBATCH --output /om2/user/zaho/private_llm_bm/reports/slurm-%A_%a.out # STDOUT
 export PATH="/om2/user/zaho/anaconda3/bin:$PATH"
 
