@@ -14,6 +14,8 @@ parser.add_argument('--n_top_pc_llm', type=int, default=-1, help='Number of top 
 parser.add_argument('--convolve_size', type=int, default=10, help='Size of convolution')
 parser.add_argument('--weight_decay', type=float, default=0.01, help='Weight decay for optimization')
 parser.add_argument('--random', type=str, default="X", help='Random string for setting seed')
+parser.add_argument('--predict_fmri_absolute', type=bool, default=False, help='Predict raw fMRI signal if True, change in fMRI signal if False')
+parser.add_argument('--use_model', type=str, default="DelayedEmbeddingLinearModelMultiFeature", help='Model to use: DelayedEmbeddingLinearModelOneFeature or DelayedEmbeddingLinearModelMultiFeature')
 args = parser.parse_args()
 
 random_seed = int(hashlib.sha1(args.random.encode("utf-8")).hexdigest(),
@@ -27,6 +29,8 @@ n_delay_embedding_llm = args.n_delay_embedding_llm
 n_top_pc_llm = args.n_top_pc_llm
 convolve_size = args.convolve_size
 weight_decay = args.weight_decay
+predict_fmri_absolute = args.predict_fmri_absolute
+use_model = args.use_model
 
 llm_model_name = ["GPT2_XL", "LLAMA_3.1_70b"][llm_model_index]
 llm_model_activations_dir = ["data_gpt2_xl", "data_llama70b"][llm_model_index]
@@ -37,7 +41,7 @@ llm_n_ctx = 1024
 # Usage
 n_delay_embedding_fmri = 0
 n_top_pc_fmri = -1  # Skip PCA for fMRI signals
-keep_dims_llm = True
+keep_dims_llm = False
 keep_dims_fmri = False
 
 num_epochs = 200
@@ -47,7 +51,10 @@ validation_data_percentage = 1 - train_data_percentage - test_data_percentage
 replace_x_with_noise = False # for control testing
 test_sequential = True  # New parameter
 
-figure_prefix = f"figures/{llm_model_activations_dir}_nde{n_delay_embedding_llm}_npc{n_top_pc_llm}_cs{convolve_size}_wd{weight_decay:.3f}_r{args.random}"
+model_short = "DEL" if use_model == "DelayedEmbeddingLinearModelOneFeature" else "DELM"
+predict_type = "abs" if predict_fmri_absolute else "delta"
+
+figure_prefix = f"figures/{llm_model_activations_dir}_nde{n_delay_embedding_llm}_npc{n_top_pc_llm}_cs{convolve_size}_wd{weight_decay:.3f}_{model_short}_{predict_type}_r{args.random}"
 os.makedirs('figures', exist_ok=True) # Create the 'figures' directory if it doesn't exist
 
 # %%
@@ -217,10 +224,13 @@ def create_training_dataset(subject_runs_mean_llm_features, subject_runs_fMRI_si
             X_llm_run.append(run_llm[i-n_delay_embedding_llm:i])
             
             # For X_fmri: take the last n_delay_embedding_fmri vectors, excluding the current
-            X_fmri_run.append(run_fMRI[i-n_delay_embedding_fmri-1:i-1])
+            X_fmri_run.append(run_fMRI[i-n_delay_embedding_fmri:i])
             
             # For y: calculate the difference between current and previous fMRI signal
-            y_run.append(run_fMRI[i] - run_fMRI[i-1])
+            if predict_fmri_absolute:
+                y_run.append(run_fMRI[i])
+            else:
+                y_run.append(run_fMRI[i] - run_fMRI[i-1])
         
         X_llm_all.append(np.array(X_llm_run))
         X_fmri_all.append(np.array(X_fmri_run))
@@ -246,9 +256,9 @@ X_llm, X_fmri, y, llm_pca, fmri_pca = create_training_dataset(
 
 # %%
 # Define Linear Regression Model
-class DelayedEmbeddingLinearModel(nn.Module):
+class DelayedEmbeddingLinearModelOneFeature(nn.Module):
     def __init__(self, X_llm, X_fmri):
-        super(DelayedEmbeddingLinearModel, self).__init__()
+        super(DelayedEmbeddingLinearModelOneFeature, self).__init__()
         self.linear_llm1 = nn.Linear(X_llm.shape[-1], 1)  # Output size is 1 per timestep of delay embedding
         self.linear_llm2 = nn.Linear(X_llm.shape[1], 1) # final output
         self.linear_fmri = nn.Linear(X_fmri.shape[-1], 1)
@@ -262,6 +272,23 @@ class DelayedEmbeddingLinearModel(nn.Module):
         # print(self.linear_llm1(X_llm).shape, self.linear_llm1(X_llm).squeeze(dim=-1).shape)
         # print(self.linear_llm2(self.linear_llm1(X_llm).squeeze(dim=-1)).shape)
         # exit()
+
+        return self.linear_llm2(self.linear_llm1(X_llm).squeeze(dim=-1)) + self.linear_fmri(X_fmri)
+        return self.linear_llm2(torch.maximum(self.linear_llm1(X_llm).squeeze(), torch.tensor(0))) + self.linear_fmri(X_fmri)
+
+class DelayedEmbeddingLinearModelMultiFeature(nn.Module):
+    def __init__(self, X_llm, X_fmri):
+        super(DelayedEmbeddingLinearModelMultiFeature, self).__init__()
+
+        n_llm_batches, n_llm_timesteps, n_llm_features = X_llm.shape
+        self.linear_llm1 = nn.Linear(X_llm.shape[-1] * n_llm_timesteps, 1)  # Output size is 1 per timestep of delay embedding
+        self.linear_fmri = nn.Linear(X_fmri.shape[-1], 1)
+
+    def forward(self, X):
+        X_llm, X_fmri = X
+        n_llm_batches, n_llm_timesteps, n_llm_features = X_llm.shape
+
+        return self.linear_llm1(X_llm.reshape(n_llm_batches, n_llm_timesteps*n_llm_features)) + self.linear_fmri(X_fmri)
 
         return self.linear_llm2(self.linear_llm1(X_llm).squeeze(dim=-1)) + self.linear_fmri(X_fmri)
         return self.linear_llm2(torch.maximum(self.linear_llm1(X_llm).squeeze(), torch.tensor(0))) + self.linear_fmri(X_fmri)
@@ -285,7 +312,8 @@ y_test = torch.tensor(y[test_indices], dtype=torch.float32)
 
 # %%
 # Initialize the model, loss function, and optimizer
-regression_model = DelayedEmbeddingLinearModel(X_llm, X_fmri)
+model_class = DelayedEmbeddingLinearModelMultiFeature if use_model == "DelayedEmbeddingLinearModelMultiFeature" else DelayedEmbeddingLinearModelOneFeature
+regression_model = model_class(X_llm, X_fmri)
 #regression_model = LinearRegressionModel(input_size=X.shape[1])
 optimizer = optim.Adam(regression_model.parameters(), lr=0.01, weight_decay=weight_decay)
 criterion = nn.MSELoss()
@@ -407,7 +435,6 @@ ax1.plot(train_time, train_predictions, color='red', linewidth=1.5, label='model
 ax1.fill_between(train_time, train_data - train_error, train_data + train_error, 
                  color='k', alpha=0.2, label=error_label)
 ax1.set_ylabel('fMRI Signal (z-scored)')
-ax1.set_ylim(-1.5, 1.5)
 ax1.grid(True, linestyle='--', alpha=0.7)
 #ax1.legend(loc='upper right')
 ax1.set_title('train')
@@ -419,10 +446,18 @@ ax2.fill_between(test_time, test_data - test_error, test_data + test_error,
                  color='k', alpha=0.2, label=error_label)
 ax2.set_xlabel('token #')
 ax2.set_ylabel('fMRI Signal (z-scored)')
-ax2.set_ylim(-1.5, 1.5)
 ax2.grid(True, linestyle='--', alpha=0.7)
 #ax2.legend(loc='upper right')
 ax2.set_title('test')
+
+# Set y-limits based on predict_fmri_absolute
+if predict_fmri_absolute:
+    max_abs_y = max(abs(np.max(mean_data)), abs(np.min(mean_data)))
+    ax1.set_ylim(-max_abs_y, max_abs_y)
+    ax2.set_ylim(-max_abs_y, max_abs_y)
+else:
+    ax1.set_ylim(-1.5, 1.5)
+    ax2.set_ylim(-1.5, 1.5)
 
 # Adjust x-limits to make the plots continuous
 ax1.set_xlim(train_data_n//16, train_data_n//8)
@@ -432,7 +467,6 @@ plt.savefig(figure_prefix + "_fit.pdf", bbox_inches="tight")
 
 # %%
 import json
-
 # Create a dictionary with all the parameters and results
 data_to_save = {
     "r_value_train": float(r_value_train),
@@ -453,7 +487,9 @@ data_to_save = {
     "weight_decay": weight_decay,
     "train_data_percentage": train_data_percentage,
     "replace_x_with_noise": replace_x_with_noise,
-    "test_sequential": test_sequential
+    "test_sequential": test_sequential,
+    "use_model": use_model,
+    "predict_fmri_absolute": predict_fmri_absolute
 }
 
 # Save the data to a JSON file
